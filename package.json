@@ -1,0 +1,56 @@
+{
+  "name": "magicdata-intellisense",
+  "displayName": "MagicData IntelliSense",
+  "description": "MagicData AutoComplete Extension",
+  "version": "0.0.3",
+  "engines": {
+    "vscode": "^1.125.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "magicdata.createProject",
+        "title": "MagicData: Create New Project"
+      }
+    ],
+    "languages": [
+      {
+        "id": "magicdata",
+        "aliases": [
+          "MagicData",
+          "magicdata"
+        ],
+        "extensions": [
+          ".magicdata",
+          ".mdl",
+          ".jtm"
+        ]
+      }
+    ],
+    "grammars": [
+      {
+        "language": "magicdata",
+        "scopeName": "text.xml.magicdata",
+        "path": "./magicdata.tmLanguage.json"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "dependencies": {
+    "fast-xml-parser": "^5.11.0"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^26.2.0",
+    "@types/vscode": "^1.134.0"
+  }
+}
