@@ -9,11 +9,13 @@ export function activate(context: vscode.ExtensionContext) {
     let schema: {
         elements: { [key: string]: any },
         actions: { [key: string]: any },
+        tagEnums: { [tagName: string]: { [attrName: string]: string[] } },
         enums: { [key: string]: string[] },
         expressions: string[]
     } = {
         elements: {},
         actions: {},
+        tagEnums: {},
         enums: {},
         expressions: []
     };
@@ -26,7 +28,7 @@ export function activate(context: vscode.ExtensionContext) {
             const jsonObj = parser.parse(xmlData);
             const root = jsonObj.MagicDataLanguage;
 
-            // 1. Parse AutoCompleteExpression
+            // Parse AutoCompleteExpression
             const exprRows = root?.AutoCompleteExpression?.Row;
             if (Array.isArray(exprRows)) {
                 exprRows.forEach((row: any) => {
@@ -37,7 +39,7 @@ export function activate(context: vscode.ExtensionContext) {
                 });
             }
 
-            // 2. Parse Elements & Attributes
+            // Parse Elements & Attributes
             const elementsList = root?.Element;
             if (Array.isArray(elementsList)) {
                 elementsList.forEach((elem: any) => {
@@ -69,21 +71,33 @@ export function activate(context: vscode.ExtensionContext) {
 
                             if (attr.Enum && attrName) {
                                 const enumList = Array.isArray(attr.Enum) ? attr.Enum : [attr.Enum];
-                                const cleanedEnums = enumList.filter((v: any) => v !== undefined && String(v).trim() !== '');
+                                const cleanedEnums = enumList
+                                    .map((v: any) => String(v).trim())
+                                    .filter((v: string) => v !== '');
+
                                 if (cleanedEnums.length > 0) {
+                                    if (name) {
+                                        if (!schema.tagEnums[name]) {
+                                            schema.tagEnums[name] = {};
+                                        }
+                                        const existing = schema.tagEnums[name][attrName] || [];
+                                        schema.tagEnums[name][attrName] = [...new Set([...existing, ...cleanedEnums])];
+                                    }
                                     schema.enums[attrName] = [...new Set([...(schema.enums[attrName] || []), ...cleanedEnums])];
                                 }
                             }
                         });
                     }
 
-                    if (type === 'Action' && key) {
+                    // Register action metadata strictly to schema.actions if Type="Action"
+                    if (type === 'Action' && key && key.toUpperCase() !== 'ACTION') {
                         schema.actions[key] = {
-                            hint: hint,
+                            hint: hint || `MagicData Action: ${key}`,
                             requiredAttributes: requiredAttributes,
                             optionalAttributes: optionalAttributes
                         };
                     } else if (name && !schema.elements[name]) {
+                        // Register structural XML tags only
                         schema.elements[name] = {
                             hint: hint,
                             isSelfClosing: name === 'ACTION' || name === 'Field' || name === 'LogParameters',
@@ -92,16 +106,20 @@ export function activate(context: vscode.ExtensionContext) {
                         };
                     }
 
+                    // Collect action names from ACTION element enums
                     if (name === 'ACTION' && attributes) {
                         attributes.forEach((attr: any) => {
                             if (attr['@_Name'] === 'Name' && attr.Enum) {
                                 const enumValues = Array.isArray(attr.Enum) ? attr.Enum : [attr.Enum];
                                 enumValues.forEach((actName: string) => {
-                                    if (actName && !schema.actions[actName]) {
-                                        schema.actions[actName] = {
-                                            hint: `MagicData Action: ${actName}`,
-                                            requiredAttributes: []
-                                        };
+                                    if (actName && actName.toUpperCase() !== 'ACTION') {
+                                        if (!schema.actions[actName]) {
+                                            schema.actions[actName] = {
+                                                hint: `MagicData Action: ${actName}`,
+                                                requiredAttributes: [],
+                                                optionalAttributes: []
+                                            };
+                                        }
                                     }
                                 });
                             }
@@ -110,7 +128,7 @@ export function activate(context: vscode.ExtensionContext) {
                 });
             }
 
-            // 3. Register Core Elements
+            // Register Core Elements
             const mdElements = root?.MDElements?.Row;
             if (Array.isArray(mdElements)) {
                 mdElements.forEach((row: any) => {
@@ -131,7 +149,7 @@ export function activate(context: vscode.ExtensionContext) {
                 });
             }
 
-            // Explicitly guarantee ACTION tag exists
+            // Guarantee ACTION tag exists
             schema.elements['ACTION'] = {
                 hint: 'Executes a single action or command',
                 isSelfClosing: true,
@@ -145,14 +163,10 @@ export function activate(context: vscode.ExtensionContext) {
     }
 
     function buildAttributeSnippet(attr: string, index: number): string {
-        const enumValues = schema.enums?.[attr];
-        if (enumValues && enumValues.length > 0) {
-            return `${attr}="\${${index}|${enumValues.join(',')}|}"`;
-        }
         return `${attr}="$${index}"`;
     }
 
-    // ---- Completion Provider ----
+    // Completion Provider
     const completionProvider = vscode.languages.registerCompletionItemProvider(
         ['xml', 'magicdata', 'plaintext'],
         {
@@ -160,7 +174,7 @@ export function activate(context: vscode.ExtensionContext) {
                 const completionItems: vscode.CompletionItem[] = [];
                 const linePrefix = document.lineAt(position).text.substring(0, position.character);
 
-                // 1. Tag completion (<)
+                // Tag completion (<)
                 const tagMatch = linePrefix.match(/<([A-Za-z0-9_-]*)$/);
                 if (tagMatch) {
                     if (schema.elements) {
@@ -195,7 +209,7 @@ export function activate(context: vscode.ExtensionContext) {
                     return completionItems;
                 }
 
-                // 2. Attribute completion inside a tag
+                // Attribute completion inside a tag
                 const openTagMatch = linePrefix.match(/<([A-Za-z0-9_-]+)(?:\s+[\w-]+=*(?:"[^"]*"|'[^']*')?)*\s+([\w-]*)$/);
                 if (openTagMatch) {
                     const tagName = openTagMatch[1];
@@ -224,17 +238,25 @@ export function activate(context: vscode.ExtensionContext) {
                     return completionItems;
                 }
 
-                // 3. Values inside quotes
+                // Values inside quotes
                 const lastAttrRegex = /([A-Za-z0-9_-]+)=["']([^"']*)$/;
                 const attrMatch = linePrefix.match(lastAttrRegex);
 
                 if (attrMatch) {
                     const attrName = attrMatch[1];
-                    
                     const currentTagMatch = linePrefix.match(/<([A-Za-z0-9_-]+)\b[^>]*$/);
                     const tagName = currentTagMatch ? currentTagMatch[1] : '';
 
-                    // Offer action names STRICTLY inside <ACTION Name="...">
+                    // Special predefined options for Len attribute
+                    if (attrName === 'Len') {
+                        const commonLengths = ['10', '20', '30', '50', '100', '255'];
+                        commonLengths.forEach(lenVal => {
+                            completionItems.push(new vscode.CompletionItem(lenVal, vscode.CompletionItemKind.Value));
+                        });
+                        return completionItems;
+                    }
+
+                    // Special logic for action names strictly inside <ACTION Name="...">
                     if (tagName.toLowerCase() === 'action' && attrName === 'Name' && schema.actions) {
                         Object.keys(schema.actions).forEach((actionName) => {
                             const actionDef = schema.actions[actionName];
@@ -252,36 +274,44 @@ export function activate(context: vscode.ExtensionContext) {
 
                             const snippetSuffix = otherAttrsSnippet ? ` ${otherAttrsSnippet}` : '';
 
-                            item.insertText = new vscode.SnippetString(
-                                `${actionName}"${snippetSuffix}`
-                            );
+                            item.insertText = new vscode.SnippetString(`${actionName}${snippetSuffix}`);
 
                             completionItems.push(item);
                         });
                         return completionItems;
                     }
 
-                    // Offer expressions/functions inside Rule or Expression attributes
+                    // Special logic for expressions or functions inside Rule or Expression attributes
                     if ((attrName === 'Expression' || attrName === 'Rule' || attrName === 'Experssion') && schema.expressions) {
                         schema.expressions.forEach((expr) => {
                             const item = new vscode.CompletionItem(expr, vscode.CompletionItemKind.Function);
                             item.insertText = expr;
                             completionItems.push(item);
                         });
+                        return completionItems;
                     }
 
-                    // Offer predefined Enums BUT skip free-text Name attributes in structural tags
-                    const enumValues = schema.enums?.[attrName];
-                    if (enumValues) {
-                        if (attrName === 'Name' && tagName.toLowerCase() !== 'action') {
-                            return completionItems;
-                        }
+                    // Generic lookup: check tag-specific enums first, then global enums
+                    const matchedTagKey = Object.keys(schema.tagEnums).find(
+                        k => k.trim().toLowerCase() === tagName.trim().toLowerCase()
+                    );
 
-                        enumValues.forEach((val: string) => {
+                    const tagSpecificEnums = matchedTagKey ? schema.tagEnums[matchedTagKey]?.[attrName] : undefined;
+                    const globalEnums = schema.enums?.[attrName];
+                    const availableValues = tagSpecificEnums || globalEnums;
+
+                    // If enums exist for this attribute, offer them
+                    if (availableValues && availableValues.length > 0) {
+                        availableValues.forEach((val: string) => {
                             completionItems.push(new vscode.CompletionItem(val, vscode.CompletionItemKind.Value));
                         });
+                        return completionItems;
                     }
-                    return completionItems;
+
+                    // Generic fallback: suppress word completion for free-text attributes
+                    const dummyItem = new vscode.CompletionItem('', vscode.CompletionItemKind.Text);
+                    dummyItem.insertText = '';
+                    return new vscode.CompletionList([dummyItem], true);
                 }
 
                 return completionItems;
