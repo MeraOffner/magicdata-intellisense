@@ -5,6 +5,7 @@ import { EXTENSION_CONSTANTS } from '../constants';
 export interface AttributeDefinition {
     name: string;
     isRequired: boolean;
+    aType?: string;
     allowedValues: string[];
 }
 
@@ -64,7 +65,7 @@ export function parseMDLangXml(xmlPath: string): Schema {
         });
     }
 
-    // 3. Parse Elements & Attributes
+    // 3. Parse Elements & Attributes directly from XML
     const elementsList = root?.Element;
     if (Array.isArray(elementsList)) {
         elementsList.forEach((elem: any) => {
@@ -98,6 +99,7 @@ export function parseMDLangXml(xmlPath: string): Schema {
                     parsedAttributes[attrName] = {
                         name: attrName,
                         isRequired: isReq,
+                        aType: attr['@_AType'] || '',
                         allowedValues: allowedValues
                     };
                 });
@@ -118,7 +120,7 @@ export function parseMDLangXml(xmlPath: string): Schema {
                 schema.elements[name] = elementDef;
             }
 
-            // Collect sub-actions from ACTION Name enums
+            // Collect sub-actions from ACTION Name enums dynamically
             if (name === actionTag && attributesRaw) {
                 attributesRaw.forEach((attr: any) => {
                     if (attr['@_Name'] === 'Name' && attr.Enum) {
@@ -139,7 +141,7 @@ export function parseMDLangXml(xmlPath: string): Schema {
         });
     }
 
-    // 4. Register Core Elements
+    // 4. Register Core Elements from MDElements
     const mdElements = root?.MDElements?.Row;
     if (Array.isArray(mdElements)) {
         mdElements.forEach((row: any) => {
@@ -154,22 +156,6 @@ export function parseMDLangXml(xmlPath: string): Schema {
                         attributes: {}
                     };
                 }
-            }
-        });
-    }
-
-   // 5. Keep ACTION element clean with only its basic schema attributes
-    if (schema.elements[actionTag]) {
-        const actionElement = schema.elements[actionTag];
-
-        // Ensure common required/optional base attributes for ACTION tag itself
-        ['Name', 'Alias', 'Value', 'Field', 'Rule', 'Expression'].forEach(attrName => {
-            if (!actionElement.attributes[attrName]) {
-                actionElement.attributes[attrName] = {
-                    name: attrName,
-                    isRequired: attrName === 'Name',
-                    allowedValues: []
-                };
             }
         });
     }
