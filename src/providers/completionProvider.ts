@@ -29,26 +29,32 @@ export function createCompletionProvider(schema: Schema): vscode.Disposable {
                                 item.documentation = new vscode.MarkdownString(element.hint);
                             }
 
-                            const reqAttrs = Object.values(element.attributes)
-                                .filter(a => a.isRequired)
-                                .map(a => a.name);
-
-                            let reqAttrsSnippet = '';
-                            if (reqAttrs.length > 0) {
-                                reqAttrsSnippet = ' ' + reqAttrs
-                                    .map((attr: string, idx: number) => buildAttributeSnippet(attr, idx + 1))
-                                    .join(' ');
-                            }
-
-                            if (element.isSelfClosing) {
-                                item.insertText = new vscode.SnippetString(
-                                    snippets.SELF_CLOSING_TAG(element.name, reqAttrsSnippet)
-                                );
+                            // Dynamic snippet insertion for <Resource> tag (Name first, then Type)
+                            if (element.name.toLowerCase() === 'resource') {
+                                item.insertText = new vscode.SnippetString('Resource Name="$1" Type="$2" />');
+                                item.command = { command: 'editor.action.triggerSuggest', title: 'Re-trigger suggestions' };
                             } else {
-                                const lastIndex = reqAttrs.length + 1;
-                                item.insertText = new vscode.SnippetString(
-                                    snippets.OPEN_CLOSE_TAG(element.name, reqAttrsSnippet, lastIndex)
-                                );
+                                const reqAttrs = Object.values(element.attributes)
+                                    .filter(a => a.isRequired)
+                                    .map(a => a.name);
+
+                                let reqAttrsSnippet = '';
+                                if (reqAttrs.length > 0) {
+                                    reqAttrsSnippet = ' ' + reqAttrs
+                                        .map((attr: string, idx: number) => buildAttributeSnippet(attr, idx + 1))
+                                        .join(' ');
+                                }
+
+                                if (element.isSelfClosing) {
+                                    item.insertText = new vscode.SnippetString(
+                                        snippets.SELF_CLOSING_TAG(element.name, reqAttrsSnippet)
+                                    );
+                                } else {
+                                    const lastIndex = reqAttrs.length + 1;
+                                    item.insertText = new vscode.SnippetString(
+                                        snippets.OPEN_CLOSE_TAG(element.name, reqAttrsSnippet, lastIndex)
+                                    );
+                                }
                             }
 
                             completionItems.push(item);
@@ -78,6 +84,21 @@ export function createCompletionProvider(schema: Schema): vscode.Disposable {
                         }
                     }
 
+                    // Context-aware logic for <Resource Type="...">
+                    if (tagName.toLowerCase() === 'resource') {
+                        const fullLineText = document.lineAt(position.line).text;
+                        const resourceTypeMatch = fullLineText.match(/\bType=["']([^"']+)["']/i);
+
+                        if (resourceTypeMatch && resourceTypeMatch[1]) {
+                            const specificResourceType = resourceTypeMatch[1].toUpperCase();
+                            const specificResourceDef = schema.resources?.[specificResourceType];
+
+                            if (specificResourceDef && Object.keys(specificResourceDef.attributes).length > 0) {
+                                element = specificResourceDef;
+                            }
+                        }
+                    }
+
                     if (element && element.attributes) {
                         const fullLineText = document.lineAt(position.line).text;
 
@@ -101,6 +122,47 @@ export function createCompletionProvider(schema: Schema): vscode.Disposable {
                     const attrName = attrMatch[1];
                     const currentTagMatch = linePrefix.match(regex.CURRENT_TAG_NAME);
                     const tagName = currentTagMatch ? currentTagMatch[1] : '';
+
+                    // Resource Type completions dynamically loaded from parsed Schema
+                    if (tagName.toLowerCase() === 'resource' && attrName === 'Type' && schema.resources) {
+                        const fullLineText = document.lineAt(position.line).text;
+
+                        Object.values(schema.resources).forEach((resourceDef) => {
+                            const item = new vscode.CompletionItem(resourceDef.name, vscode.CompletionItemKind.Value);
+
+                            if (resourceDef.hint) {
+                                item.documentation = new vscode.MarkdownString(resourceDef.hint);
+                            }
+
+                            // Dynamically collect required attributes for this resource type, excluding 'name' and 'type' or existing attributes
+                            const reqAttrs = Object.values(resourceDef.attributes).filter(
+                                a => a.isRequired && 
+                                     a.name.toLowerCase() !== 'type' && 
+                                     a.name.toLowerCase() !== 'name' &&
+                                     !regex.ATTRIBUTE_EXISTS(a.name).test(fullLineText)
+                            );
+
+                            const otherAttrsSnippet = reqAttrs
+                                .map((a, idx) => buildAttributeSnippet(a.name, idx + 1))
+                                .join(' ');
+
+                            const snippetSuffix = otherAttrsSnippet ? ` ${otherAttrsSnippet}` : '';
+
+                            const lineText = document.lineAt(position.line).text;
+                            const charAfterCursor = lineText.charAt(position.character);
+
+                            // Append missing required attributes outside quotes
+                            if (charAfterCursor === '"' || charAfterCursor === "'") {
+                                item.range = new vscode.Range(position, position.translate(0, 1));
+                                item.insertText = new vscode.SnippetString(`${resourceDef.name}"${snippetSuffix}`);
+                            } else {
+                                item.insertText = new vscode.SnippetString(`${resourceDef.name}${snippetSuffix}`);
+                            }
+
+                            completionItems.push(item);
+                        });
+                        return completionItems;
+                    }
 
                     // Action Name completions dynamically loaded from parsed Schema
                     if (tagName.toLowerCase() === actionTag.toLowerCase() && attrName === 'Name' && schema.actions) {
@@ -137,7 +199,7 @@ export function createCompletionProvider(schema: Schema): vscode.Disposable {
                         return completionItems;
                     }
 
-                    // Get current element or sub-action definition from XML Schema
+                    // Get current element, sub-action, or sub-resource definition from XML Schema
                     let element = schema.elements?.[tagName];
 
                     if (tagName.toLowerCase() === actionTag.toLowerCase()) {
@@ -146,10 +208,22 @@ export function createCompletionProvider(schema: Schema): vscode.Disposable {
 
                         if (actionNameMatch && actionNameMatch[1]) {
                             const specificActionName = actionNameMatch[1];
-                            const specificActionDef = schema.actions[specificActionName];
+                            const specificActionDef = schema.actions?.[specificActionName];
 
                             if (specificActionDef) {
                                 element = specificActionDef;
+                            }
+                        }
+                    } else if (tagName.toLowerCase() === 'resource') {
+                        const fullLineText = document.lineAt(position.line).text;
+                        const resourceTypeMatch = fullLineText.match(/\bType=["']([^"']+)["']/i);
+
+                        if (resourceTypeMatch && resourceTypeMatch[1]) {
+                            const specificResourceType = resourceTypeMatch[1].toUpperCase();
+                            const specificResourceDef = schema.resources?.[specificResourceType];
+
+                            if (specificResourceDef) {
+                                element = specificResourceDef;
                             }
                         }
                     }

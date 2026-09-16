@@ -9,7 +9,10 @@
   "categories": [
     "Programming Languages"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onLanguage:xml",
+    "onLanguage:plaintext"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [

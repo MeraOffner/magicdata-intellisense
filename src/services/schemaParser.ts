@@ -19,6 +19,7 @@ export interface ElementDefinition {
 export interface Schema {
     elements: { [tagName: string]: ElementDefinition };
     actions: { [actionName: string]: ElementDefinition };
+    resources: { [resourceType: string]: ElementDefinition }; // <- מפת המשאבים
     expressions: string[];
 }
 
@@ -26,6 +27,7 @@ export function parseMDLangXml(xmlPath: string): Schema {
     const schema: Schema = {
         elements: {},
         actions: {},
+        resources: {},
         expressions: []
     };
 
@@ -116,6 +118,11 @@ export function parseMDLangXml(xmlPath: string): Schema {
 
             if (type === 'Action' && key && key.toUpperCase() !== actionTag) {
                 schema.actions[key] = elementDef;
+            } else if (type === 'Resource' && key) {
+                schema.resources[key.toUpperCase()] = elementDef;
+                if (name) {
+                    schema.resources[name.toUpperCase()] = elementDef;
+                }
             } else if (name && !schema.elements[name]) {
                 schema.elements[name] = elementDef;
             }

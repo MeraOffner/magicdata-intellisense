@@ -1,0 +1,9 @@
+## [1.0.0] - 2026-08-30
+
+### Fixed
+* **Attribute Auto-Completion:** Fixed auto-completion behavior inside the `Name` attribute quotes within `Action` tags.
+* **Self-Closing Tags:** Corrected XML tag formatting to enforce self-closing syntax on designated single-tag elements.
+
+### Refactored
+* **Dynamic Data Source:** Replaced hardcoded configuration logic with dynamic parsing directly from `MDLang.xml`.
+* **Code Architecture:** Modularized codebase across multiple files and extracted inline strings into dedicated constants.
